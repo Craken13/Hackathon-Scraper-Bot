@@ -1,0 +1,77 @@
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Net.Mail;
+using System.Text.RegularExpressions;
+using HtmlAgilityPack;
+
+class Program
+{
+    static void Main()
+    {
+        Console.Write("Enter location filter: South Africa ");
+        string locationFilter = Console.ReadLine();
+        
+        List<string> Hackathons = ScrapeHackathons(locationFilter);
+        if (Hackathons.Count > 0)
+        {
+            SendEmail(Hackathons);
+        }
+        else
+        {
+            Console.WriteLine("No Hackathons found for the specified location.");
+        }
+    }
+
+    static List<string> ScrapeHackathons(string locationFilter)
+    {
+        string url = "https://mlh.io/seasons/2024/events";
+        var web = new HtmlWeb();
+        var doc = web.Load(url);
+        List<string> Hackathons = new List<string>();
+
+        foreach (var eventNode in doc.DocumentNode.SelectNodes("//div[contains(@class, 'event')]") ?? new List<HtmlNode>())
+        {
+            string title = eventNode.SelectSingleNode(".//h3").InnerText.Trim();
+            string date = eventNode.SelectSingleNode(".//div[contains(@class, 'event-date')]").InnerText.Trim();
+            string location = eventNode.SelectSingleNode(".//div[contains(@class, 'event-location')]").InnerText.Trim();
+            string link = eventNode.SelectSingleNode(".//a").GetAttributeValue("href", "");
+            
+            if (location.ToLower().Contains(locationFilter.ToLower()))
+            {
+                Hackathons.Add($"{title} - {date} - {location} - {link}");
+            }
+        }
+        return Hackathons;
+    }
+
+    static void SendEmail(List<string> Hackathons)
+    {
+        string senderEmail = "your_email@gmail.com";
+        string receiverEmail = "receiver_email@gmail.com";
+        string password = "your_email_password";
+        string subject = "Upcoming Hackathons!";
+        string body = string.Join("\n", Hackathons);
+
+        try
+        {
+            MailMessage mail = new MailMessage();
+            SmtpClient smtpServer = new SmtpClient("smtp.gmail.com");
+            mail.From = new MailAddress(senderEmail);
+            mail.To.Add(receiverEmail);
+            mail.Subject = subject;
+            mail.Body = body;
+
+            smtpServer.Port = 587;
+            smtpServer.Credentials = new System.Net.NetworkCredential(senderEmail, password);
+            smtpServer.EnableSsl = true;
+            smtpServer.Send(mail);
+
+            Console.WriteLine("Email sent successfully!");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error sending email: {ex.Message}");
+        }
+    }
+}
