@@ -1,60 +1,104 @@
-import requests
-from bs4 import BeautifulSoup
-import smtplib
-import os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from dotenv import load_dotenv
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Net.Mail;
+using System.Threading.Tasks;
+using HtmlAgilityPack;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
-# Load environment variables
-load_dotenv()
+class Program
+{
+    private static readonly HttpClient client = new HttpClient();
+    private static IConfiguration configuration;
+    private static ILogger<Program> logger;
 
-# Scraper function
-def scrape_hackathons():
-    url = "https://mlh.io/seasons/2024/events"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    
-    hackathons = []
-    for event in soup.select(".event"):
-        title = event.select_one("h3").text.strip()
-        date = event.select_one(".event-date").text.strip()
-        location = event.select_one(".event-location").text.strip()
-        link = event.select_one("a")['href']
-        
-        if "South Africa" in location:
-            hackathons.append(f"{title} - {date} - {location} - {link}")
-    
-    return hackathons
+    static async Task Main(string[] args)
+    {
+        // Load environment variables
+        var builder = new ConfigurationBuilder()
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+            .AddEnvironmentVariables();
+        configuration = builder.Build();
 
-# Email sending function
-def send_email(hackathons):
-    sender_email = os.getenv("EMAIL_SENDER")
-    receiver_email = os.getenv("EMAIL_RECEIVER")
-    password = os.getenv("EMAIL_PASSWORD")
-    
-    subject = "Upcoming Hackathons in South Africa!"
-    body = "\n".join(hackathons)
-    
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    msg['Subject'] = subject
-    
-    msg.attach(MIMEText(body, 'plain'))
-    
-    try:
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.starttls()
-            server.login(sender_email, password)
-            server.sendmail(sender_email, receiver_email, msg.as_string())
-        print("Email sent successfully!")
-    except Exception as e:
-        print(f"Error sending email: {e}")
+        // Configure logging
+        using var loggerFactory = LoggerFactory.Create(loggingBuilder => loggingBuilder.AddConsole());
+        logger = loggerFactory.CreateLogger<Program>();
 
-if __name__ == "__main__":
-    hackathons = scrape_hackathons()
-    if hackathons:
-        send_email(hackathons)
-    else:
-        print("No hackathons found in South Africa.")
+        var hackathons = await ScrapeHackathons();
+        if (hackathons.Count > 0)
+        {
+            SendEmail(hackathons);
+        }
+        else
+        {
+            logger.LogInformation("No hackathons found.");
+        }
+    }
+
+    private static async Task<List<string>> ScrapeHackathons()
+    {
+        var url = "https://mlh.io/seasons/2024/events";
+        var hackathons = new List<string>();
+
+        try
+        {
+            var response = await client.GetStringAsync(url);
+            var doc = new HtmlDocument();
+            doc.LoadHtml(response);
+
+            foreach (var eventNode in doc.DocumentNode.SelectNodes("//div[contains(@class, 'event')]"))
+            {
+                var title = eventNode.SelectSingleNode(".//h3").InnerText.Trim();
+                var date = eventNode.SelectSingleNode(".//div[contains(@class, 'event-date')]").InnerText.Trim();
+                var location = eventNode.SelectSingleNode(".//div[contains(@class, 'event-location')]").InnerText.Trim();
+                var link = eventNode.SelectSingleNode(".//a").GetAttributeValue("href", string.Empty);
+
+                if (location.Contains("South Africa"))
+                {
+                    hackathons.Add($"{title} - {date} - {location} - {link}");
+                }
+            }
+        }
+        catch (HttpRequestException e)
+        {
+            logger.LogError($"Error fetching hackathons: {e.Message}");
+        }
+
+        return hackathons;
+    }
+
+    private static void SendEmail(List<string> hackathons)
+    {
+        var senderEmail = configuration["EMAIL_SENDER"];
+        var receiverEmail = configuration["EMAIL_RECEIVER"];
+        var password = configuration["EMAIL_PASSWORD"];
+
+        if (string.IsNullOrEmpty(senderEmail) || string.IsNullOrEmpty(receiverEmail) || string.IsNullOrEmpty(password))
+        {
+            logger.LogError("Email credentials are not set in environment variables.");
+            return;
+        }
+
+        var subject = "Upcoming Hackathons in South Africa!";
+        var body = string.Join("\n", hackathons);
+
+        var msg = new MailMessage(senderEmail, receiverEmail, subject, body);
+
+        using var client = new SmtpClient("smtp.gmail.com", 587)
+        {
+            Credentials = new System.Net.NetworkCredential(senderEmail, password),
+            EnableSsl = true
+        };
+
+        try
+        {
+            client.Send(msg);
+            logger.LogInformation("Email sent successfully.");
+        }
+        catch (SmtpException e)
+        {
+            logger.LogError($"Error sending email: {e.Message}");
+        }
+    }
+}
