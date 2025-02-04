@@ -1,5 +1,8 @@
 {
     "cSpell.words": [
-        "Hackathons"
+        "getenv",
+        "Hackathons",
+        "smtplib",
+        "starttls"
     ]
 }
